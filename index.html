@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Muscular Power Analytics</title>
+<style>
+:root{--bg:#f4f6fa;--fg:#1b2333;--card:#fff;--pri:#1f3864;--mut:#6b7385;--bd:#d9deea;--ok:#1e8e5a;--bad:#c0392b}
+@media(prefers-color-scheme:dark){:root{--bg:#10151f;--fg:#e8ecf4;--card:#1a2130;--pri:#6f9bff;--mut:#98a2b8;--bd:#2d3750;--ok:#4cc38a;--bad:#ff7b6b}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 Sarabun,Tahoma,sans-serif;background:var(--bg);color:var(--fg)}
+header{background:var(--pri);color:#fff;padding:10px 14px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+header b{margin-right:10px}header button{background:#ffffff22;color:#fff;border:0;border-radius:6px;padding:6px 10px;cursor:pointer}
+header button.on{background:#fff;color:#1f3864}main{max-width:1000px;margin:0 auto;padding:14px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:14px;margin-bottom:14px}
+.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+label{display:block;font-size:13px;color:var(--mut);margin-top:6px}
+input,select,button.b{width:100%;padding:8px;border:1px solid var(--bd);border-radius:6px;background:var(--card);color:var(--fg);font:inherit}
+button.b{background:var(--pri);color:#fff;border:0;cursor:pointer;margin-top:8px;width:auto;padding:8px 16px}button.b.s{background:var(--mut)}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:6px;border-bottom:1px solid var(--bd);text-align:left}th{color:var(--mut)}
+.big{font-size:26px;font-weight:700;color:var(--pri)}.mut{color:var(--mut);font-size:13px}.ok{color:var(--ok)}.bad{color:var(--bad)}
+.bar{height:8px;border-radius:4px;background:var(--pri)}.tbl{overflow-x:auto}details{margin:4px 0}img.ph{width:36px;height:36px;border-radius:50%;object-fit:cover}
+</style></head><body>
+<header id="hd"></header><main id="m"></main>
+<script>
+const $=i=>document.getElementById(i),N=v=>v===''||v==null?NaN:+v,esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function ls(k,v){try{if(v===undefined)return localStorage.getItem(k)||'';v?localStorage.setItem(k,v):localStorage.removeItem(k)}catch(e){return ''}}
+const S={api:ls('api'),token:ls('tk'),user:null,D:{}};
+async function api(a,p={}){const r=await fetch(S.api,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({a,t:S.token,...p})});const j=await r.json();if(!j.ok)throw new Error(j.error);return j}
+const today=()=>new Date().toISOString().slice(0,10);
+/* ---------- Calculation Engine: อ่านสูตรจากแท็บ Calc_Formulas ---------- */
+const PC={};
+function parse(src){if(PC[src])return PC[src];const t=src.match(/\d+\.?\d*|[A-Za-z_]\w*|>=|<=|==|[-+*\/^(),<>]/g)||[];let i=0,cmp;
+const bin=(nx,ops,fn)=>()=>{let a=nx();while(ops.includes(t[i])){const o=t[i++],b=nx(),l=a;a=e=>fn(o,l(e),b(e))}return a};
+const pr=()=>{const k=t[i++];if(k=='('){const a=cmp();i++;return a}if(/^\d/.test(k))return()=>+k;
+if(t[i]=='('){i++;const ar=[];while(t[i]!=')'){ar.push(cmp());if(t[i]==',')i++}i++;
+return e=>{switch(k){case'if':return ar[0](e)?ar[1](e):ar[2](e);case'has':return isNaN(ar[0](e))?0:1;case'na':return NaN;case'sqrt':return Math.sqrt(ar[0](e));case'abs':return Math.abs(ar[0](e));case'round':return Math.round(ar[0](e));case'min':return Math.min(...ar.map(f=>f(e)));case'max':return Math.max(...ar.map(f=>f(e)))}return NaN}}
+return e=>N(e[k])};
+const un=()=>{if(t[i]=='-'){i++;const a=un();return e=>-a(e)}return pr()};
+const pw=()=>{const a=un();if(t[i]=='^'){i++;const b=pw();return e=>Math.pow(a(e),b(e))}return a};
+const mul=bin(pw,['*','/'],(o,x,y)=>o=='*'?x*y:x/y),add=bin(mul,['+','-'],(o,x,y)=>o=='+'?x+y:x-y);
+cmp=bin(add,['>','<','>=','<=','=='],(o,x,y)=>+(o=='>'?x>y:o=='<'?x<y:o=='>='?x>=y:o=='<='?x<=y:x==y));
+return PC[src]=cmp()}
+function calc(tid,vals){const env={g:N(S.D.cfg.gravity_g)||9.81,...vals},out={};
+S.D.Calc_Formulas.filter(f=>f.test_id==tid).sort((a,b)=>a.ord-b.ord).forEach(f=>{let v;try{v=parse(f.expression)(env)}catch(e){v=NaN}
+v=isFinite(v)?+v.toFixed(+f.decimals||0):null;env[f.output_key]=v==null?NaN:v;out[f.output_key]={v,label:f.label_th,unit:f.unit,p:f.is_primary=='Y'}});return out}
+/* ---------- ข้อมูล ---------- */
+async function load(){const n=['Athletes','Teams','Organizations','Sports','Test_Library','Test_Fields','Calc_Formulas','Body_Metrics','Test_Sessions','Test_Results'];
+const r=await Promise.all(n.map(x=>api('list',{s:x})));n.forEach((x,i)=>S.D[x]=r[i].rows);
+S.D.cfg=Object.fromEntries((await api('list',{s:'Config'})).rows.map(x=>[x.key,x.value]))}
+const tl=id=>S.D.Test_Library.find(t=>t.test_id==id)||{},ath=id=>S.D.Athletes.find(a=>a.athlete_id==id),
+an=a=>a?a.first_name+' '+a.last_name:'',sess=id=>S.D.Test_Sessions.find(s=>s.session_id==id)||{},
+opt=(arr,k,l,sel)=>arr.map(x=>`<option value="${esc(x[k])}"${x[k]==sel?' selected':''}>${esc(typeof l=='function'?l(x):x[l])}</option>`).join('');
+function bodyMass(id){const m=S.D.Body_Metrics.filter(x=>x.athlete_id==id).sort((a,b)=>a.date<b.date?1:-1)[0];return m?m.body_mass_kg:''}
+function bests(rows){const g={};rows.forEach(r=>{const k=r.session_id+'|'+r.athlete_id+'|'+r.test_id,v=N(r.primary_value);if(isNaN(v))return;const m=tl(r.test_id).best_of=='min';
+if(!g[k]||(m?v<g[k].v:v>g[k].v))g[k]={...r,v,date:sess(r.session_id).date||''}});return Object.values(g)}
+function ensureSession(date,phase){let s=S.D.Test_Sessions.find(x=>x.date==date&&x.phase==phase);if(s)return Promise.resolve(s);
+return api('save',{s:'Test_Sessions',rec:{session_name:date+' '+phase,date,phase}}).then(r=>{S.D.Test_Sessions.push(r.rec);return r.rec})}
+function chart(p){if(!p.length)return'';const W=360,H=110,ys=p.map(a=>a.y),mn=Math.min(...ys),r=(Math.max(...ys)-mn)||1,X=i=>20+i*(W-40)/Math.max(1,p.length-1),Y=v=>H-22-(v-mn)/r*(H-44);
+return`<svg viewBox="0 0 ${W} ${H}" width="100%"><polyline fill="none" stroke="var(--pri)" stroke-width="2" points="${p.map((a,i)=>X(i)+','+Y(a.y)).join(' ')}"/>${p.map((a,i)=>`<circle cx="${X(i)}" cy="${Y(a.y)}" r="3" fill="var(--bad)"/><text x="${X(i)}" y="${Y(a.y)-6}" font-size="9" text-anchor="middle" fill="currentColor">${a.y}</text><text x="${X(i)}" y="${H-4}" font-size="8" text-anchor="middle" fill="var(--mut)">${a.x.slice(2)}</text>`).join('')}</svg>`}
+/* ---------- UI ---------- */
+const NAV=[['home','ภาพรวม'],['ath','นักกีฬา'],['tests','คลังแบบทดสอบ'],['rec','บันทึกผล'],['rep','รายงาน'],['imp','นำเข้า CSV']];
+function shell(p){$('hd').innerHTML='<b>⚡ Muscular Power</b>'+NAV.map(n=>`<button class="${n[0]==p?'on':''}" onclick="go('${n[0]}')">${n[1]}</button>`).join('')+`<span style="flex:1"></span><span class="mut" style="color:#fff">${esc(S.user?S.user.n+' ('+S.user.r+')':'')}</span><button onclick="logout()">ออก</button>`}
+function go(p){shell(p);P[p]()}
+function logout(){ls('tk','');S.token='';S.user=null;$('hd').innerHTML='';login()}
+function login(msg){$('m').innerHTML=`<div class="card" style="max-width:420px;margin:40px auto"><h2>เข้าสู่ระบบ</h2><p class="mut">ระบบวิเคราะห์พลังกล้ามเนื้อ</p>
+<label>Apps Script Web App URL</label><input id="u_api" value="${esc(S.api)}" placeholder="https://script.google.com/macros/s/.../exec">
+<label>ชื่อผู้ใช้</label><input id="u_u"><label>รหัสผ่าน</label><input id="u_p" type="password" onkeydown="if(event.key=='Enter')doLogin()">
+<button class="b" onclick="doLogin()">เข้าสู่ระบบ</button><p class="bad">${esc(msg||'')}</p></div>`}
+async function doLogin(){try{S.api=$('u_api').value.trim();ls('api',S.api);const r=await api('login',{user:$('u_u').value,pass:$('u_p').value});
+S.token=r.token;S.user=r.user;ls('tk',r.token);ls('user',JSON.stringify(r.user));$('m').innerHTML='กำลังโหลดข้อมูล...';await load();go('home')}catch(e){login(e.message)}}
+const P={};
+P.home=()=>{const D=S.D,rs=D.Test_Results.slice(-8).reverse();$('m').innerHTML=`<div class="g">${[['นักกีฬา',D.Athletes.length],['ทีม',D.Teams.length],['แบบทดสอบ',D.Test_Library.length],['ผลทดสอบ',D.Test_Results.length]].map(c=>`<div class="card"><div class="mut">${c[0]}</div><div class="big">${c[1]}</div></div>`).join('')}</div>
+<div class="card"><h3>ผลล่าสุด</h3><div class="tbl"><table><tr><th>วันที่</th><th>นักกีฬา</th><th>ทดสอบ</th><th>ครั้งที่</th><th>ค่าหลัก</th></tr>${rs.map(r=>`<tr><td>${esc(sess(r.session_id).date)}</td><td>${esc(an(ath(r.athlete_id)))}</td><td>${esc(tl(r.test_id).name_th)}</td><td>${esc(r.trial_no)}</td><td>${esc(r.primary_value)}</td></tr>`).join('')||'<tr><td colspan=5 class="mut">ยังไม่มีข้อมูล</td></tr>'}</table></div></div>`};
+let editId='';
+P.ath=()=>{const D=S.D;$('m').innerHTML=`<div class="card"><h3>เพิ่ม/แก้ไขนักกีฬา</h3><div class="g">
+<div><label>รหัส</label><input id="f_code"></div><div><label>ชื่อ</label><input id="f_fn"></div><div><label>นามสกุล</label><input id="f_ln"></div>
+<div><label>เพศ</label><select id="f_sex"><option value="M">ชาย</option><option value="F">หญิง</option></select></div><div><label>วันเกิด</label><input id="f_bd" type="date"></div><div><label>ส่วนสูง (cm)</label><input id="f_h" type="number"></div>
+<div><label>กีฬา</label><select id="f_sport"><option value="">-</option>${opt(D.Sports,'sport_id','name_th')}</select></div>
+<div><label>หน่วยงาน</label><select id="f_org"><option value="">-</option>${opt(D.Organizations,'org_id','org_name')}</select></div>
+<div><label>ทีม</label><select id="f_team"><option value="">-</option>${opt(D.Teams,'team_id','team_name')}</select></div>
+<div><label>รูปถ่าย</label><input id="f_photo" type="file" accept="image/*"></div></div>
+<button class="b" onclick="saveAth()">บันทึก</button> <button class="b s" onclick="addOrg()">+ หน่วยงาน</button> <button class="b s" onclick="addTeam()">+ ทีม (ตามหน่วยงาน/กีฬาที่เลือก)</button></div>
+<div class="card tbl"><table><tr><th></th><th>รหัส</th><th>ชื่อ</th><th>ทีม</th><th>มวลกาย</th><th></th></tr>${D.Athletes.map(a=>`<tr><td>${a.photo_url?`<img class="ph" src="${esc(a.photo_url)}">`:''}</td><td>${esc(a.athlete_code)}</td><td>${esc(an(a))}</td><td>${esc((D.Teams.find(t=>t.team_id==a.team_id)||{}).team_name)}</td><td>${esc(bodyMass(a.athlete_id))}</td>
+<td><a href="#" onclick="editAth('${a.athlete_id}');return false">แก้ไข</a> · <a href="#" onclick="addBM('${a.athlete_id}');return false">+มวลกาย</a></td></tr>`).join('')}</table></div>`};
+async function addOrg(){const n=prompt('ชื่อหน่วยงาน');if(!n)return;const t=prompt('ประเภท (มหาวิทยาลัย/โรงเรียนกีฬา/ทีมจังหวัด/ทีมชาติ/สโมสร/บุคคลทั่วไป)','โรงเรียนกีฬา');const r=await api('save',{s:'Organizations',rec:{org_name:n,org_type:t,active:'Y'}});S.D.Organizations.push(r.rec);P.ath()}
+async function addTeam(){const n=prompt('ชื่อทีม');if(!n)return;const r=await api('save',{s:'Teams',rec:{team_name:n,org_id:$('f_org').value,sport_id:$('f_sport').value,active:'Y'}});S.D.Teams.push(r.rec);P.ath()}
+async function addBM(id){const v=prompt('มวลกาย (kg)');if(!v)return;const r=await api('save',{s:'Body_Metrics',rec:{athlete_id:id,date:today(),body_mass_kg:v}});S.D.Body_Metrics.push(r.rec);P.ath()}
+function editAth(id){const a=ath(id);editId=id;[['code','athlete_code'],['fn','first_name'],['ln','last_name'],['sex','sex'],['bd','birth_date'],['h','height_cm'],['sport','sport_id'],['org','org_id'],['team','team_id']].forEach(([k,f])=>$('f_'+k).value=a[f]||'');scrollTo(0,0)}
+function shrink(file){return new Promise(res=>{const im=new Image();im.onload=()=>{const s=Math.min(1,480/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=im.width*s;c.height=im.height*s;c.getContext('2d').drawImage(im,0,0,c.width,c.height);res(c.toDataURL('image/jpeg',.8).split(',')[1])};im.src=URL.createObjectURL(file)})}
+async function saveAth(){try{const rec={athlete_code:$('f_code').value,first_name:$('f_fn').value,last_name:$('f_ln').value,sex:$('f_sex').value,birth_date:$('f_bd').value,height_cm:$('f_h').value,sport_id:$('f_sport').value,org_id:$('f_org').value,team_id:$('f_team').value,active:'Y'};
+if(!rec.first_name)return alert('กรุณากรอกชื่อ');if(editId)rec.athlete_id=editId;
+const f=$('f_photo').files[0];if(f){const u=await api('upload',{b64:await shrink(f),mime:'image/jpeg',name:(rec.athlete_code||'athlete')+'.jpg',entity:'athlete',folder:'photos'});rec.photo_url=u.url}
+const r=await api('save',{s:'Athletes',rec});const i=S.D.Athletes.findIndex(a=>a.athlete_id==r.rec.athlete_id);if(i>=0)S.D.Athletes[i]={...S.D.Athletes[i],...r.rec};else S.D.Athletes.push(r.rec);editId='';P.ath()}catch(e){alert(e.message)}}
+P.tests=()=>{$('m').innerHTML=`<div class="card"><h3>คลังแบบทดสอบ</h3><p class="mut">เพิ่ม/แก้ไขแบบทดสอบ ฟิลด์ และสูตร ได้ที่แท็บ Test_Library, Test_Fields, Calc_Formulas ในชีต</p>${S.D.Test_Library.map(t=>`<details><summary><b>${esc(t.name_th)}</b> <span class="mut">${esc(t.category)} · ${esc(t.test_id)}</span></summary><p>${esc(t.protocol_th)}</p>
+<div class="mut">ฟิลด์: ${S.D.Test_Fields.filter(f=>f.test_id==t.test_id).map(f=>esc(f.label_th)+(f.unit?' ('+esc(f.unit)+')':'')).join(', ')}</div>
+<div class="mut">สูตร: ${S.D.Calc_Formulas.filter(f=>f.test_id==t.test_id).map(f=>`${esc(f.label_th)} = <code>${esc(f.expression)}</code>`).join(' · ')}</div></details>`).join('')}</div>`};
+P.rec=()=>{const D=S.D;$('m').innerHTML=`<div class="card"><h3>บันทึกผลทดสอบ</h3><div class="g"><div><label>วันที่</label><input id="r_d" type="date" value="${today()}"></div>
+<div><label>ช่วง</label><select id="r_ph"><option value="routine">ประจำ</option><option value="pre">ก่อนฝึก</option><option value="mid">ระหว่างฝึก</option><option value="post">หลังฝึก</option></select></div>
+<div><label>นักกีฬา</label><select id="r_a" onchange="recForm()">${opt(D.Athletes,'athlete_id',a=>a.athlete_code+' '+an(a))}</select></div>
+<div><label>แบบทดสอบ</label><select id="r_t" onchange="recForm()">${opt(D.Test_Library,'test_id','name_th')}</select></div></div>
+<div id="r_f" class="g"></div><div id="r_o"></div><button class="b" onclick="saveRes()">บันทึกครั้งนี้</button> <span id="r_msg" class="ok"></span></div>`;recForm()};
+function recForm(){const tid=$('r_t').value,a=ath($('r_a').value)||{};$('r_f').innerHTML=S.D.Test_Fields.filter(f=>f.test_id==tid).map(f=>{let d=f.default_value;if(f.field_key=='body_mass_kg')d=bodyMass(a.athlete_id);if(f.field_key=='height_cm')d=a.height_cm;
+return`<div><label>${esc(f.label_th)} ${f.unit?'('+esc(f.unit)+')':''}${f.required=='Y'?' *':''}</label><input data-k="${esc(f.field_key)}" data-u="${esc(f.unit)}" type="${f.data_type=='text'?'text':'number'}" step="any" value="${esc(d)}" oninput="recCalc()"></div>`}).join('');recCalc()}
+function recVals(){const v={},u={};document.querySelectorAll('#r_f input').forEach(i=>{v[i.dataset.k]=i.value;u[i.dataset.k]=i.dataset.u});return{v,u}}
+function recCalc(){const o=calc($('r_t').value,recVals().v);$('r_o').innerHTML='<table>'+Object.values(o).map(x=>`<tr><td>${x.p?'<b>'+esc(x.label)+'</b>':esc(x.label)}</td><td>${x.v==null?'—':x.v} ${esc(x.unit)}</td></tr>`).join('')+'</table>'}
+async function saveRes(){try{const tid=$('r_t').value,aid=$('r_a').value,{v,u}=recVals(),o=calc(tid,v),pk=tl(tid).primary_output,pv=o[pk]?o[pk].v:null;
+if(pv==null)return alert('ข้อมูลไม่ครบ ไม่สามารถคำนวณค่าหลักได้');const s=await ensureSession($('r_d').value,$('r_ph').value);
+const n=S.D.Test_Results.filter(r=>r.session_id==s.session_id&&r.athlete_id==aid&&r.test_id==tid).length+1;
+const d={};Object.entries(o).forEach(([k,x])=>d[k]={v:x.v,unit:x.unit});
+const r=await api('save',{s:'Test_Results',rec:{session_id:s.session_id,athlete_id:aid,test_id:tid,trial_no:n,raw_json:JSON.stringify({v,u}),derived_json:JSON.stringify(d),primary_value:pv,formula_ver:S.D.cfg.schema_version,source:'manual',flag:'valid'}});
+S.D.Test_Results.push(r.rec);$('r_msg').textContent='บันทึกแล้ว (ครั้งที่ '+n+') ค่าหลัก = '+pv}catch(e){alert(e.message)}}
+P.rep=()=>{const D=S.D;$('m').innerHTML=`<div class="card"><h3>รายงานรายบุคคล</h3><select id="p_a" onchange="repA()"><option value="">เลือกนักกีฬา</option>${opt(D.Athletes,'athlete_id',a=>a.athlete_code+' '+an(a))}</select><div id="p_ao"></div></div>
+<div class="card"><h3>รายงานรายทีม</h3><div class="g"><select id="p_tm" onchange="repT()"><option value="">ทุกคน</option>${opt(D.Teams,'team_id','team_name')}</select><select id="p_tt" onchange="repT()">${opt(D.Test_Library,'test_id','name_th')}</select></div><div id="p_to"></div></div>`;repT()};
+function repA(){const id=$('p_a').value,by={};bests(S.D.Test_Results.filter(r=>r.athlete_id==id)).forEach(r=>(by[r.test_id]=by[r.test_id]||[]).push(r));
+$('p_ao').innerHTML=Object.entries(by).map(([tid,a])=>{a.sort((x,y)=>x.date<y.date?-1:1);const t=tl(tid),f=a[0].v,l=a[a.length-1].v,ch=a.length>1&&f?(l-f)/Math.abs(f)*100:null,good=t.higher_is_better=='Y'?l>=f:l<=f,
+dv=JSON.parse(a[a.length-1].derived_json||'{}');
+return`<div style="margin-top:12px"><b>${esc(t.name_th)}</b> ${ch==null?'':`<span class="${good?'ok':'bad'}">ก่อน→ล่าสุด ${f} → ${l} (${ch>0?'+':''}${ch.toFixed(1)}%)</span>`}${chart(a.map(r=>({x:r.date,y:r.v})))}
+<div class="mut">${Object.entries(dv).map(([k,x])=>esc(k)+': '+(x.v==null?'—':x.v)+' '+esc(x.unit)).join(' · ')}</div></div>`}).join('')||'<p class="mut">ยังไม่มีผลทดสอบ</p>'}
+function repT(){const tm=$('p_tm').value,tid=$('p_tt').value,t=tl(tid),ids=new Set(S.D.Athletes.filter(a=>!tm||a.team_id==tm).map(a=>a.athlete_id)),last={};
+bests(S.D.Test_Results.filter(r=>r.test_id==tid&&ids.has(r.athlete_id))).forEach(r=>{if(!last[r.athlete_id]||r.date>last[r.athlete_id].date)last[r.athlete_id]=r});const a=Object.values(last);
+if(!a.length){$('p_to').innerHTML='<p class="mut">ไม่มีข้อมูล</p>';return}
+const m=a.reduce((s,r)=>s+r.v,0)/a.length,sd=Math.sqrt(a.reduce((s,r)=>s+(r.v-m)**2,0)/Math.max(1,a.length-1))||1,sg=t.higher_is_better=='Y'?1:-1;a.forEach(r=>r.z=(r.v-m)/sd*sg);a.sort((x,y)=>y.z-x.z);const mx=Math.max(...a.map(r=>r.v));
+$('p_to').innerHTML=`<p>n=${a.length} · ค่าเฉลี่ย ${m.toFixed(2)} · SD ${sd.toFixed(2)}</p><div class="tbl"><table><tr><th>#</th><th>นักกีฬา</th><th>ค่า</th><th>Z</th><th></th><th>สรุป</th></tr>${a.map((r,i)=>`<tr><td>${i+1}</td><td>${esc(an(ath(r.athlete_id)))}</td><td>${r.v}</td><td>${r.z.toFixed(2)}</td><td style="width:30%"><div class="bar" style="width:${r.v/mx*100}%"></div></td><td class="${r.z>=.5?'ok':r.z<=-.5?'bad':''}">${r.z>=.5?'จุดเด่น':r.z<=-.5?'ควรพัฒนา':'ปานกลาง'}</td></tr>`).join('')}</table></div><p class="mut">จัดกลุ่มจากค่า Z ภายในกลุ่มที่เลือก (≥0.5 เด่น, ≤−0.5 ควรพัฒนา) — เป็นข้อมูลประกอบการตัดสินใจของผู้ฝึกสอน</p>`}
+P.imp=()=>{$('m').innerHTML=`<div class="card"><h3>นำเข้า CSV</h3><p class="mut">หัวคอลัมน์: <code>athlete_code,test_id,date,trial</code> ตามด้วยคีย์ฟิลด์ของแบบทดสอบ เช่น <code>flight_time_s,body_mass_kg</code> (ดูคีย์ในหน้าคลังแบบทดสอบ/ชีต Test_Fields)</p><input type="file" id="i_f" accept=".csv"><button class="b" onclick="doImp()">นำเข้า</button><p id="i_m"></p></div>`};
+async function doImp(){try{const f=$('i_f').files[0];if(!f)return;const L=(await f.text()).replace(/\r/g,'').split('\n').filter(x=>x.trim()),H=L.shift().split(',').map(x=>x.trim()),rows=[],err=[];
+const dates=[...new Set(L.map(l=>l.split(',')[H.indexOf('date')]))];const ss={};for(const d of dates)if(d)ss[d]=(await ensureSession(d.trim(),'routine')).session_id;
+L.forEach((l,i)=>{const c=l.split(',').map(x=>x.trim()),o={};H.forEach((h,j)=>o[h]=c[j]);const a=S.D.Athletes.find(x=>x.athlete_code==o.athlete_code);if(!a||!tl(o.test_id).test_id){err.push(i+2);return}
+const v={};S.D.Test_Fields.filter(x=>x.test_id==o.test_id).forEach(x=>{v[x.field_key]=o[x.field_key]!=null&&o[x.field_key]!==''?o[x.field_key]:(x.field_key=='body_mass_kg'?bodyMass(a.athlete_id):x.default_value)});
+const out=calc(o.test_id,v),pv=(out[tl(o.test_id).primary_output]||{}).v;if(pv==null){err.push(i+2);return}const d={};Object.entries(out).forEach(([k,x])=>d[k]={v:x.v,unit:x.unit});
+rows.push({session_id:ss[o.date],athlete_id:a.athlete_id,test_id:o.test_id,trial_no:o.trial||1,raw_json:JSON.stringify({v}),derived_json:JSON.stringify(d),primary_value:pv,formula_ver:S.D.cfg.schema_version,source:'import',flag:'valid'})});
+if(rows.length)await api('bulk',{s:'Test_Results',rows});await load();$('i_m').innerHTML=`<span class="ok">นำเข้า ${rows.length} แถว</span>${err.length?` <span class="bad">ข้ามแถว: ${err.join(', ')}</span>`:''}`}catch(e){$('i_m').textContent=e.message}}
+(async()=>{if(S.api&&S.token){try{S.user=JSON.parse(ls('user')||'null');await load();return go('home')}catch(e){}}login()})();
+</script></body></html>
